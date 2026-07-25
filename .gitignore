@@ -1,0 +1,9 @@
+.env
+gifts.db
+seen_gifts.json
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.vscode/
+.idea/
