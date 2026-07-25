@@ -1,4 +1,5 @@
 import asyncio
+import os
 from datetime import datetime
 from aiogram.exceptions import TelegramUnauthorizedError, TelegramAPIError
 import config
@@ -7,7 +8,6 @@ from ton_client import TonGiftFetcher
 from bot_publisher import TelegramPublisher, bot, dp
 from admin_handlers import router as admin_router
 
-# Регистрируем роутер команд админки в главном файле
 dp.include_router(admin_router)
 
 async def monitor_loop():
@@ -35,8 +35,6 @@ async def monitor_loop():
 
             if new_count > 0:
                 print(f"[{timestamp}] 🎉 Обнаружено и опубликовано новых улучшений: {new_count}")
-            else:
-                print(f"[{timestamp}] 🔍 Опрос API завершен: новых улучшений не обнаружено.")
 
         except Exception as e:
             print(f"⚠️ Ошибка в мониторе: {e}")
@@ -44,15 +42,18 @@ async def monitor_loop():
         await asyncio.sleep(config.POLL_INTERVAL)
 
 async def main():
+    token_status = f"{config.BOT_TOKEN[:6]}..." if config.BOT_TOKEN and config.BOT_TOKEN != "YOUR_BOT_TOKEN_HERE" else "НЕ ЗАДАН (Пусто)"
+
     print("=" * 60)
     print("🚀 Запуск бота с административной панелью и фоновым монитором")
-    print(f"📁 Папка проекта: C:\\gifts\\upgrade1")
+    print(f"🔑 Статус BOT_TOKEN: {token_status}")
     print(f"⏱ Интервал опроса: {config.POLL_INTERVAL} сек.")
     print(f"📢 Канал назначения: {config.CHANNEL_ID}")
     print("=" * 60)
 
-    if not bot:
-        print("❌ Ошибка: В файле .env не указан BOT_TOKEN!")
+    if not bot or config.BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
+        print("❌ Ошибка: Переменная BOT_TOKEN не установлена или содержит стандартное значение!")
+        print("Убедитесь, что в Railway во вкладке Variables имя переменной именно BOT_TOKEN.")
         return
 
     # Проверка авторизации бота
@@ -60,7 +61,7 @@ async def main():
         me = await bot.get_me()
         print(f"✅ Успешная авторизация бота: @{me.username} ({me.first_name})")
     except TelegramUnauthorizedError:
-        print("\n❌ ОШИБКА АВТОРИЗАЦИИ ТЕЛЕГРАМ: Указан неверный BOT_TOKEN в .env!\n")
+        print("\n❌ ОШИБКА АВТОРИЗАЦИИ ТЕЛЕГРАМ: Указан неверный BOT_TOKEN!\n")
         return
     except TelegramAPIError as e:
         print(f"\n⚠️ Ошибка подключения к Telegram API: {e}\n")
@@ -70,7 +71,7 @@ async def main():
         return
 
     if config.CHANNEL_ID == "@my_gift_feed_channel" or "@your_channel_username" in config.CHANNEL_ID:
-        print("⚠️ ВНИМАНИЕ: Замените CHANNEL_ID в .env на юзернейм вашего реального Telegram-канала!\n")
+        print("⚠️ ВНИМАНИЕ: Замените CHANNEL_ID в переменной на юзернейм вашего реального Telegram-канала!\n")
 
     monitor_task = asyncio.create_task(monitor_loop())
 
