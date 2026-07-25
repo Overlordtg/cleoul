@@ -1,5 +1,6 @@
 import asyncio
 import os
+import sys
 from datetime import datetime
 from aiogram.exceptions import TelegramUnauthorizedError, TelegramAPIError
 import config
@@ -7,6 +8,9 @@ from state import StateManager
 from ton_client import TonGiftFetcher
 from bot_publisher import TelegramPublisher, bot, dp
 from admin_handlers import router as admin_router
+
+# Включаем небуферизованный вывод логов в реальном времени для Railway / Docker
+sys.stdout.reconfigure(line_buffering=True)
 
 dp.include_router(admin_router)
 
@@ -16,20 +20,19 @@ async def monitor_loop():
     fetcher = TonGiftFetcher()
     publisher = TelegramPublisher()
 
-    print("📡 Фоновый монитор минтов подарков запущен.")
+    print("📡 Фоновый монитор минтов подарков запущен.", flush=True)
 
-    # 1. Холодный запуск (Cold Start): запоминаем старые исторические минты и молча помечаем их как просмотренные,
-    # чтобы не спамить старыми подарками при перезапуске!
-    print("🌱 Инициализация: загружаем текущие исторические подарки и помечаем их как просмотренные...")
+    # 1. Холодный запуск: запоминаем текущие элементы
+    print("🌱 Инициализация: загружаем текущие исторические подарки...", flush=True)
     try:
         initial_gifts = await fetcher.fetch_latest_gift_mints(limit=50)
         for gift in initial_gifts:
             state.mark_seen(gift["id"])
-        print(f"✅ Инициализация завершена. Пропущено старых минтов: {len(initial_gifts)}. Ожидание новых апгрейдов в реальном времени...")
+        print(f"✅ Инициализация завершена. Пропущено старых минтов: {len(initial_gifts)}. Ожидание новых апгрейдов...", flush=True)
     except Exception as e:
-        print(f"⚠️ Предупреждение при инициализации: {e}")
+        print(f"⚠️ Предупреждение при инициализации: {e}", flush=True)
 
-    # 2. Живой цикл мониторинга ТОЛЬКО свежих апгрейдов
+    # 2. Живой цикл мониторинга
     while True:
         try:
             timestamp = datetime.now().strftime("%H:%M:%S")
@@ -39,7 +42,6 @@ async def monitor_loop():
             for gift in reversed(latest_gifts):
                 gift_id = gift["id"]
 
-                # Публикуем ТОЛЬКО те подарки, которые сминчены прямо сейчас (после запуска бота)
                 if not state.is_seen(gift_id):
                     success = await publisher.send_gift_notification(gift)
                     if success:
@@ -47,52 +49,55 @@ async def monitor_loop():
                         new_count += 1
 
             if new_count > 0:
-                print(f"[{timestamp}] 🎉 Обнаружено и опубликовано новых живых улучшений: {new_count}")
+                print(f"[{timestamp}] 🎉 Обнаружено и опубликовано новых живых улучшений: {new_count}", flush=True)
+            else:
+                # Печатаем каждые 10 циклов статус опроса
+                print(f"[{timestamp}] 🔍 Опрос API: новых улучшений не обнаружено.", flush=True)
 
         except Exception as e:
-            print(f"⚠️ Ошибка в мониторе: {e}")
+            print(f"⚠️ Ошибка в мониторе: {e}", flush=True)
 
         await asyncio.sleep(config.POLL_INTERVAL)
 
 async def main():
     token_status = f"{config.BOT_TOKEN[:6]}..." if config.BOT_TOKEN and config.BOT_TOKEN != "YOUR_BOT_TOKEN_HERE" else "НЕ ЗАДАН (Пусто)"
 
-    print("=" * 60)
-    print("🚀 Запуск бота с административной панелью и фоновым монитором")
-    print(f"🔑 Статус BOT_TOKEN: {token_status}")
-    print(f"⏱ Интервал опроса: {config.POLL_INTERVAL} сек.")
-    print(f"📢 Канал назначения: {config.CHANNEL_ID}")
-    print("=" * 60)
+    print("=" * 60, flush=True)
+    print("🚀 Запуск бота с административной панелью и фоновым монитором", flush=True)
+    print(f"🔑 Статус BOT_TOKEN: {token_status}", flush=True)
+    print(f"⏱ Интервал опроса: {config.POLL_INTERVAL} сек.", flush=True)
+    print(f"📢 Канал назначения: {config.CHANNEL_ID}", flush=True)
+    print("=" * 60, flush=True)
 
     if not bot or config.BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
-        print("❌ Ошибка: Переменная BOT_TOKEN не установлена!")
+        print("❌ Ошибка: Переменная BOT_TOKEN не установлена!", flush=True)
         return
 
     try:
         me = await bot.get_me()
-        print(f"✅ Успешная авторизация бота: @{me.username} ({me.first_name})")
+        print(f"✅ Успешная авторизация бота: @{me.username} ({me.first_name})", flush=True)
     except TelegramUnauthorizedError:
-        print("\n❌ ОШИБКА АВТОРИЗАЦИИ ТЕЛЕГРАМ: Указан неверный BOT_TOKEN!\n")
+        print("\n❌ ОШИБКА АВТОРИЗАЦИИ ТЕЛЕГРАМ: Указан неверный BOT_TOKEN!\n", flush=True)
         return
     except TelegramAPIError as e:
-        print(f"\n⚠️ Ошибка подключения к Telegram API: {e}\n")
+        print(f"\n⚠️ Ошибка подключения к Telegram API: {e}\n", flush=True)
         return
     except Exception as e:
-        print(f"\n⚠️ Ошибка при подключении: {e}\n")
+        print(f"\n⚠️ Ошибка при подключении: {e}\n", flush=True)
         return
 
     if config.CHANNEL_ID == "@my_gift_feed_channel" or "@your_channel_username" in config.CHANNEL_ID:
-        print("⚠️ ВНИМАНИЕ: Замените CHANNEL_ID в переменной на юзернейм вашего реального Telegram-канала!\n")
+        print("⚠️ ВНИМАНИЕ: Замените CHANNEL_ID в переменной на юзернейм вашего реального Telegram-канала!\n", flush=True)
 
     monitor_task = asyncio.create_task(monitor_loop())
 
     try:
-        print("🤖 Бот готов! Отправьте ему /test для проверки поста или /start для управления.")
+        print("🤖 Бот готов! Отправьте ему /test для проверки поста или /start для управления.", flush=True)
         await dp.start_polling(bot)
     finally:
         monitor_task.cancel()
         await bot.session.close()
-        print("✅ Бот и монитор остановлены.")
+        print("✅ Бот и монитор остановлены.", flush=True)
 
 if __name__ == "__main__":
     try:
