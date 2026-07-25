@@ -16,8 +16,20 @@ async def monitor_loop():
     fetcher = TonGiftFetcher()
     publisher = TelegramPublisher()
 
-    print("📡 Фоновый монитор минтов подарков запущен и активен.")
+    print("📡 Фоновый монитор минтов подарков запущен.")
 
+    # 1. Холодный запуск (Cold Start): запоминаем старые исторические минты и молча помечаем их как просмотренные,
+    # чтобы не спамить старыми подарками при перезапуске!
+    print("🌱 Инициализация: загружаем текущие исторические подарки и помечаем их как просмотренные...")
+    try:
+        initial_gifts = await fetcher.fetch_latest_gift_mints(limit=50)
+        for gift in initial_gifts:
+            state.mark_seen(gift["id"])
+        print(f"✅ Инициализация завершена. Пропущено старых минтов: {len(initial_gifts)}. Ожидание новых апгрейдов в реальном времени...")
+    except Exception as e:
+        print(f"⚠️ Предупреждение при инициализации: {e}")
+
+    # 2. Живой цикл мониторинга ТОЛЬКО свежих апгрейдов
     while True:
         try:
             timestamp = datetime.now().strftime("%H:%M:%S")
@@ -27,6 +39,7 @@ async def monitor_loop():
             for gift in reversed(latest_gifts):
                 gift_id = gift["id"]
 
+                # Публикуем ТОЛЬКО те подарки, которые сминчены прямо сейчас (после запуска бота)
                 if not state.is_seen(gift_id):
                     success = await publisher.send_gift_notification(gift)
                     if success:
@@ -34,7 +47,7 @@ async def monitor_loop():
                         new_count += 1
 
             if new_count > 0:
-                print(f"[{timestamp}] 🎉 Обнаружено и опубликовано новых улучшений: {new_count}")
+                print(f"[{timestamp}] 🎉 Обнаружено и опубликовано новых живых улучшений: {new_count}")
 
         except Exception as e:
             print(f"⚠️ Ошибка в мониторе: {e}")
@@ -52,11 +65,9 @@ async def main():
     print("=" * 60)
 
     if not bot or config.BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
-        print("❌ Ошибка: Переменная BOT_TOKEN не установлена или содержит стандартное значение!")
-        print("Убедитесь, что в Railway во вкладке Variables имя переменной именно BOT_TOKEN.")
+        print("❌ Ошибка: Переменная BOT_TOKEN не установлена!")
         return
 
-    # Проверка авторизации бота
     try:
         me = await bot.get_me()
         print(f"✅ Успешная авторизация бота: @{me.username} ({me.first_name})")
