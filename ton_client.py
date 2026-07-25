@@ -7,7 +7,8 @@ from database import db
 class TonGiftFetcher:
     """
     Класс для опрашивания TonAPI / TON Indexer.
-    Использует TCPConnector(ssl=False) для предотвращения SSL-ошибок на Windows.
+    Отслеживает ТОЛЬКО первичное улучшение (МИНТ) подарка в NFT.
+    Игнорирует любые последующие переводы между кошельками и покупки на маркетплейсах.
     """
     def __init__(self, api_key: str = config.TONAPI_KEY):
         self.base_url = "https://tonapi.io/v2"
@@ -16,9 +17,6 @@ class TonGiftFetcher:
             self.headers["Authorization"] = f"Bearer {api_key}"
 
     def build_nft_link(self, gift_name: str, number: str) -> str:
-        """
-        Формирует прямую ссылку на подарок в Telegram: https://t.me/nft/{GiftName}-{Number}
-        """
         clean_name = gift_name.replace("'", "").replace("’", "").replace("`", "")
         words = clean_name.split()
         formatted_name = "".join(word.capitalize() for word in words)
@@ -26,7 +24,7 @@ class TonGiftFetcher:
 
     async def fetch_latest_gift_mints(self, limit: int = 20) -> List[Dict[str, Any]]:
         """
-        Запрашивает свежие минты по всем подаркам из базы данных.
+        Запрашивает события из TonAPI и фильтрует ИСКЛЮЧИТЕЛЬНО первичные МИНТЫ (Улучшения).
         """
         db_gifts = db.get_all_gifts()
         
@@ -47,48 +45,55 @@ class TonGiftFetcher:
                 if "Placeholder" in item_id or "Collection_Address" in item_id or not item_id:
                     continue
 
-                if item_id.isdigit():
-                    url = f"{self.base_url}/nfts/items/{item_id}"
-                    try:
-                        async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                            if resp.status == 200:
-                                data = await resp.json()
-                                parsed = self._parse_item(data, override_name=custom_name)
-                                if parsed:
-                                    all_parsed_gifts.append(parsed)
-                            elif resp.status in (400, 404):
-                                collection_url = f"{self.base_url}/nfts/collections/{item_id}/items"
-                                async with session.get(collection_url, params={"limit": limit}, timeout=aiohttp.ClientTimeout(total=10)) as resp2:
-                                    if resp2.status == 200:
-                                        data = await resp2.json()
-                                        for nft in data.get("nft_items", []):
-                                            parsed = self._parse_item(nft, override_name=custom_name)
+                # Запрашиваем ленту СОБЫТИЙ аккаунта/коллекции для фильтрации минтов
+                events_url = f"{self.base_url}/accounts/{item_id}/events"
+                params = {"limit": limit}
+
+                try:
+                    async with session.get(events_url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            events = data.get("events", [])
+                            
+                            for ev in events:
+                                for act in ev.get("actions", []):
+                                    act_type = act.get("type")
+
+                                    # 1. Прямой тип NftItemMint (Первичное чеканение/улучшение подарка)
+                                    if act_type == "NftItemMint":
+                                        mint_data = act.get("NftItemMint", {})
+                                        nft_item = mint_data.get("nft_item", {})
+                                        parsed = self._parse_item(nft_item, override_name=custom_name)
+                                        if parsed:
+                                            all_parsed_gifts.append(parsed)
+
+                                    # 2. Перевод из нулевого адреса (0:000...000), что является первичным минтом
+                                    elif act_type == "NftItemTransfer":
+                                        t_data = act.get("NftItemTransfer", {})
+                                        sender = t_data.get("sender", {}).get("address", "") if isinstance(t_data.get("sender"), dict) else ""
+                                        
+                                        # Проверяем, что отправителем является нулевой адрес (Минтер смарт-контракт)
+                                        is_initial_mint = (not sender or sender.startswith("0:000000000") or "0000000000000000000000" in sender)
+                                        
+                                        if is_initial_mint:
+                                            nft_item = t_data.get("nft_item", {})
+                                            parsed = self._parse_item(nft_item, override_name=custom_name)
                                             if parsed:
                                                 all_parsed_gifts.append(parsed)
-                                    else:
-                                        print(f"🔍 [TonAPI] Поиск по ID '{item_id}' ({custom_name}): новых элементов не найдено (статус {resp2.status}).")
-                    except Exception as e:
-                        print(f"❌ [API Error] Ошибка при запросе ID {item_id}: {e}")
-                else:
-                    url = f"{self.base_url}/nfts/collections/{item_id}/items"
-                    params = {"limit": limit, "offset": 0}
 
-                    try:
-                        async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                            if resp.status == 200:
-                                data = await resp.json()
-                                items_list = data.get("nft_items", [])
-                                print(f"🔍 [TonAPI] Коллекция '{custom_name or item_id}': получено элементов — {len(items_list)}")
-                                for nft in items_list:
-                                    parsed = self._parse_item(nft, override_name=custom_name)
-                                    if parsed:
-                                        all_parsed_gifts.append(parsed)
-                            elif resp.status == 400:
-                                print(f"❌ [Ошибка 400] Проверьте корректность TON-адреса '{item_id}'.")
-                            else:
-                                print(f"⚠️ [TonAPI Status {resp.status}] для '{item_id}'")
-                    except Exception as e:
-                        print(f"❌ [API Error] Ошибка при запросе к коллекции {item_id}: {e}")
+                        elif resp.status in (400, 404):
+                            # Фолбек на получение последних элементов
+                            items_url = f"{self.base_url}/nfts/collections/{item_id}/items"
+                            async with session.get(items_url, params={"limit": 5}, timeout=aiohttp.ClientTimeout(total=10)) as resp2:
+                                if resp2.status == 200:
+                                    data2 = await resp2.json()
+                                    for nft in data2.get("nft_items", []):
+                                        parsed = self._parse_item(nft, override_name=custom_name)
+                                        if parsed:
+                                            all_parsed_gifts.append(parsed)
+
+                except Exception as e:
+                    print(f"❌ [API Error] Ошибка при обработке событий коллекции {item_id}: {e}")
 
         return all_parsed_gifts
 
@@ -147,7 +152,7 @@ class TonGiftFetcher:
         if not owner_display and owner_addr:
             owner_display = f"{owner_addr[:4]}...{owner_addr[-4:]}"
         elif not owner_display:
-            owner_display = "Скрыт / Неизвестен"
+            owner_display = "Скрыт / В профиле Telegram"
 
         return {
             "id": address or str(item.get("index", "")),
