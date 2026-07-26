@@ -10,7 +10,7 @@ dp = Dispatcher()
 class TelegramPublisher:
     """
     Класс для отправки карточек уведомлений с интегрированной гиперссылкой в заголовке,
-    которая формирует встроенное карточка-превью картинки Telegram как на образце.
+    формирующей встроенное превью картинки Telegram.
     """
     def __init__(self, channel_id: str = config.CHANNEL_ID):
         self.channel_id = channel_id
@@ -26,16 +26,16 @@ class TelegramPublisher:
         symbol = gift_info.get("symbol", "—")
         backdrop = gift_info.get("backdrop", "—")
         full_title = gift_info.get("full_title", "Telegram Gift")
-        link = gift_info.get("link", "")
+        link = gift_info.get("link", "https://t.me")
 
-        # Ссылка вшита прямо в заголовок <a href='...'>Название #Номер</a> для создания карточки превью
+        # Telegram HTML парсер требует строго двойные кавычки в <a href="..."> для создания гиперссылки и превью!
         text = (
             "<b>Gift Upgrade Alert</b>\n"
-            f"🎁 <a href='{link}'><b>{full_title}</b></a>\n\n"
+            f'🎁 <a href="{link}"><b>{full_title}</b></a>\n\n'
             f"👤 <b>Owner:</b> <code>{owner}</code>\n\n"
             f"🎨 <b>Model:</b> {model}\n"
             f"✨ <b>Symbol:</b> {symbol}\n"
-            f"🌈 <b>Backdrop:</b> {backdrop}\n\n"
+            f"🐸 <b>Backdrop:</b> {backdrop}\n\n"
             f"<b>{self.channel_id}</b>"
         )
 
@@ -58,7 +58,7 @@ class TelegramPublisher:
                 reply_markup=keyboard,
                 disable_web_page_preview=False
             )
-            print(f"[Bot Success] Карточка с превью отправлена в канал: {full_title}")
+            print(f"[Bot Success] Карточка с кликабельным заголовком и превью отправлена в канал: {full_title}")
             return True
         except Exception as e:
             print(f"[Bot Error] Не удалось отправить сообщение в канал {self.channel_id}: {e}")
