@@ -37,12 +37,15 @@ class StarsGiftTracker:
 
             @app.on_message()
             async def handle_gift_event(client: Client, message: Message):
-                text = message.text or message.caption or ""
-                if any(word in text.lower() for word in ["улучшен", "upgraded", "gift", "подарок"]):
-                    parsed = self._parse_event(message, text)
-                    if parsed and not self.state.is_seen(parsed["id"]):
-                        await self.publisher.send_gift_notification(parsed)
-                        self.state.mark_seen(parsed["id"])
+                try:
+                    text = message.text or message.caption or ""
+                    if any(word in text.lower() for word in ["улучшен", "upgraded", "gift", "подарок"]):
+                        parsed = self._parse_event(message, text)
+                        if parsed and not self.state.is_seen(parsed["id"]):
+                            await self.publisher.send_gift_notification(parsed)
+                            self.state.mark_seen(parsed["id"])
+                except Exception as e:
+                    print(f"⚠️ Ошибка обработки события Pyrogram: {e}")
 
             await app.start()
             print("✅ Pyrogram Stars Tracker успешно подключен к серверам Telegram и слушает эфир!")
@@ -63,13 +66,20 @@ class StarsGiftTracker:
         formatted_name = "".join(word.capitalize() for word in words)
         link = f"https://t.me/nft/{formatted_name}-{number}"
 
+        owner = "В профиле Telegram"
+        try:
+            if hasattr(message, "from_user") and message.from_user and message.from_user.username:
+                owner = f"@{message.from_user.username}"
+        except Exception:
+            pass
+
         return {
             "id": f"stars_upgrade_{message.id}_{number}",
             "gift_name": gift_name,
             "number": number,
             "link": link,
             "full_title": f"{gift_name} #{number}",
-            "owner": getattr(message.from_user, "username", "В профиле Telegram") if hasattr(message, "from_user") and message.from_user else "В профиле Telegram",
+            "owner": owner,
             "model": "Эксклюзивная (за Звёзды)",
             "symbol": "Стандартный",
             "backdrop": "Стандартный"
