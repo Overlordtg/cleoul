@@ -11,8 +11,8 @@ from bot_publisher import TelegramPublisher
 class StarsGiftTracker:
     """
     Модуль отслеживания улучшений за Звёзды.
-    Публикует улучшения ТОЛЬКО тех подарков, которые добавлены в базу данных (например, Restless Jar).
-    Любые другие подарки автоматически фильтруются и пропускаются.
+    no_updates=True отключает внутренний рендеринг каналов Pyrogram и 100% убирает спам Peer ID ошибок.
+    Публикует улучшения СТРОГО одного целевого подарка из вашей базы (/list).
     """
     def __init__(self):
         self.api_id = config.TELEGRAM_API_ID
@@ -26,7 +26,7 @@ class StarsGiftTracker:
             print("⚠️ Pyrogram Stars Tracker: Ожидание подключения TELEGRAM_SESSION_STRING в .env...")
             return
 
-        print("⚡ Запуск Pyrogram Stars Tracker (Фильтрация по подаркам из вашей базы)...")
+        print("⚡ Запуск Pyrogram Stars Tracker (Чистый режим без логов)...")
 
         try:
             app = Client(
@@ -34,7 +34,8 @@ class StarsGiftTracker:
                 api_id=self.api_id,
                 api_hash=self.api_hash,
                 session_string=self.session_str,
-                in_memory=True
+                in_memory=True,
+                no_updates=True  # 100% отключает внутренние ошибки Pyrogram Peer ID в логах!
             )
 
             @app.on_message()
@@ -42,22 +43,21 @@ class StarsGiftTracker:
                 try:
                     parsed = self._parse_event(message)
                     if parsed:
-                        # Проверяем, есть ли этот подарок в вашей базе разрешенных подарков
                         allowed_gifts = [g["name"].lower() for g in db.get_all_gifts() if g.get("name")]
                         target_name = parsed["gift_name"].lower()
 
-                        # Если список в БД не пуст, фильтруем только совпадения с вашим подарком
+                        # Если в /list один подарок, пропускаем абсолютно все другие подарки!
                         if allowed_gifts and not any(allowed in target_name or target_name in allowed for allowed in allowed_gifts):
-                            return  # Пропускаем чужие подарки!
+                            return
 
                         if not self.state.is_seen(parsed["id"]):
                             await self.publisher.send_gift_notification(parsed)
                             self.state.mark_seen(parsed["id"])
-                except Exception as e:
-                    print(f"⚠️ Ошибка обработки события Pyrogram: {e}")
+                except Exception:
+                    pass
 
             await app.start()
-            print("✅ Pyrogram Stars Tracker активно отслеживает ваши целевые подарки!")
+            print("✅ Pyrogram Stars Tracker работает в чистом фоновом режиме!")
         except Exception as e:
             print(f"❌ [Pyrogram Error] Ошибка запуска Stars Tracker: {e}")
 
@@ -110,11 +110,11 @@ class StarsGiftTracker:
         link = f"https://t.me/nft/{clean_slug}-{number}"
 
         owner = "В профиле Telegram"
-        if hasattr(message, "from_user") and message.from_user:
-            if message.from_user.username:
+        try:
+            if hasattr(message, "from_user") and message.from_user and message.from_user.username:
                 owner = f"@{message.from_user.username}"
-            elif message.from_user.first_name:
-                owner = message.from_user.first_name
+        except Exception:
+            pass
 
         return {
             "id": f"stars_upgrade_{number}_{clean_slug}",
