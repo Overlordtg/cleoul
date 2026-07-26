@@ -9,7 +9,8 @@ dp = Dispatcher()
 
 class TelegramPublisher:
     """
-    Класс для отправки красивых карточек уведомлений с подробными характеристиками подарков.
+    Класс для отправки карточек уведомлений с интегрированной гиперссылкой в заголовке,
+    которая формирует встроенное карточка-превью картинки Telegram как на образце.
     """
     def __init__(self, channel_id: str = config.CHANNEL_ID):
         self.channel_id = channel_id
@@ -20,21 +21,21 @@ class TelegramPublisher:
             print(f"[Bot Console Log] Улучшен новый подарок! {gift_info['full_title']} -> {gift_info['link']}")
             return True
 
-        owner = gift_info.get("owner", "Неизвестен")
-        model = gift_info.get("model", "Н/Д")
-        symbol = gift_info.get("symbol", "Н/Д")
-        backdrop = gift_info.get("backdrop", "Н/Д")
+        owner = gift_info.get("owner", "В профиле Telegram")
+        model = gift_info.get("model", "—")
+        symbol = gift_info.get("symbol", "—")
+        backdrop = gift_info.get("backdrop", "—")
         full_title = gift_info.get("full_title", "Telegram Gift")
         link = gift_info.get("link", "")
 
-        # Красиво скомпонованный текст сообщения по образцу
+        # Ссылка вшита прямо в заголовок <a href='...'>Название #Номер</a> для создания карточки превью
         text = (
             "<b>Gift Upgrade Alert</b>\n"
-            f"🍧 <b>{full_title}</b>\n\n"
+            f"🎁 <a href='{link}'><b>{full_title}</b></a>\n\n"
             f"👤 <b>Owner:</b> <code>{owner}</code>\n\n"
             f"🎨 <b>Model:</b> {model}\n"
             f"✨ <b>Symbol:</b> {symbol}\n"
-            f"🐸 <b>Backdrop:</b> {backdrop}\n\n"
+            f"🌈 <b>Backdrop:</b> {backdrop}\n\n"
             f"<b>{self.channel_id}</b>"
         )
 
@@ -57,7 +58,7 @@ class TelegramPublisher:
                 reply_markup=keyboard,
                 disable_web_page_preview=False
             )
-            print(f"[Bot Success] Карточка отправлена в канал: {full_title}")
+            print(f"[Bot Success] Карточка с превью отправлена в канал: {full_title}")
             return True
         except Exception as e:
             print(f"[Bot Error] Не удалось отправить сообщение в канал {self.channel_id}: {e}")
