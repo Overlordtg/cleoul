@@ -1,5 +1,6 @@
 import asyncio
 import re
+from typing import Optional, Dict, Any
 from pyrogram import Client, filters
 from pyrogram.types import Message
 import config
@@ -37,7 +38,6 @@ class StarsGiftTracker:
             @app.on_message()
             async def handle_gift_event(client: Client, message: Message):
                 text = message.text or message.caption or ""
-                # Фильтруем сообщения об улучшениях подарков в Telegram
                 if any(word in text.lower() for word in ["улучшен", "upgraded", "gift", "подарок"]):
                     parsed = self._parse_event(message, text)
                     if parsed and not self.state.is_seen(parsed["id"]):
@@ -50,7 +50,6 @@ class StarsGiftTracker:
             print(f"❌ [Pyrogram Error] Ошибка запуска Stars Tracker: {e}")
 
     def _parse_event(self, message: Message, text: str) -> Optional[Dict[str, Any]]:
-        # Извлекаем название подарка и номер
         match = re.search(r"^(.*?)\s*#(\d+)$", text.strip(), re.MULTILINE)
         if match:
             gift_name = match.group(1).strip()
@@ -70,7 +69,7 @@ class StarsGiftTracker:
             "number": number,
             "link": link,
             "full_title": f"{gift_name} #{number}",
-            "owner": getattr(message.from_user, "username", "В профиле Telegram"),
+            "owner": getattr(message.from_user, "username", "В профиле Telegram") if hasattr(message, "from_user") and message.from_user else "В профиле Telegram",
             "model": "Эксклюзивная (за Звёзды)",
             "symbol": "Стандартный",
             "backdrop": "Стандартный"
