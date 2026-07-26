@@ -10,6 +10,12 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
 # Юзернейм или ID вашего канала
 CHANNEL_ID = os.getenv("CHANNEL_ID", "@your_channel_username")
 
+# Ключи Telegram API с сайта my.telegram.org для отслеживания апгрейдов за Звезды
+_raw_api_id = os.getenv("TELEGRAM_API_ID", "")
+TELEGRAM_API_ID = int(_raw_api_id) if _raw_api_id.isdigit() else 0
+TELEGRAM_API_HASH = os.getenv("TELEGRAM_API_HASH", "")
+TELEGRAM_SESSION_STRING = os.getenv("TELEGRAM_SESSION_STRING", "")
+
 # Ключ TonAPI (получить бесплатно на https://tonconsole.com)
 TONAPI_KEY = os.getenv("TONAPI_KEY", "")
 
@@ -23,10 +29,10 @@ ADMIN_IDS: List[int] = [
     int(aid.strip()) for aid in _raw_admin_ids.split(",") if aid.strip().isdigit()
 ]
 
-# Интервал проверки новых минтов в секундах
+# Интервал проверки в секундах
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "5"))
 
-# Резервные адреса из .env (если БД пуста)
+# Резервные адреса из .env
 _raw_addresses = os.getenv("GIFTS_COLLECTION_ADDRESS", "")
 
 def get_fallback_addresses() -> List[str]:

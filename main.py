@@ -6,23 +6,23 @@ from aiogram.exceptions import TelegramUnauthorizedError, TelegramAPIError
 import config
 from state import StateManager
 from ton_client import TonGiftFetcher
+from stars_tracker import StarsGiftTracker
 from bot_publisher import TelegramPublisher, bot, dp
 from admin_handlers import router as admin_router
 
-# Включаем небуферизованный вывод логов в реальном времени для Railway / Docker
+# Включаем небуферизованный вывод логов в реальном времени для Railway
 sys.stdout.reconfigure(line_buffering=True)
 
 dp.include_router(admin_router)
 
 async def monitor_loop():
-    """Фоновый цикл мониторинга новых минтов подарков."""
+    """Фоновый цикл мониторинга минтов подарков."""
     state = StateManager()
     fetcher = TonGiftFetcher()
     publisher = TelegramPublisher()
 
     print("📡 Фоновый монитор минтов подарков запущен.", flush=True)
 
-    # 1. Холодный запуск: запоминаем текущие элементы
     print("🌱 Инициализация: загружаем текущие исторические подарки...", flush=True)
     try:
         initial_gifts = await fetcher.fetch_latest_gift_mints(limit=50)
@@ -32,7 +32,6 @@ async def monitor_loop():
     except Exception as e:
         print(f"⚠️ Предупреждение при инициализации: {e}", flush=True)
 
-    # 2. Живой цикл мониторинга
     while True:
         try:
             timestamp = datetime.now().strftime("%H:%M:%S")
@@ -51,7 +50,6 @@ async def monitor_loop():
             if new_count > 0:
                 print(f"[{timestamp}] 🎉 Обнаружено и опубликовано новых живых улучшений: {new_count}", flush=True)
             else:
-                # Печатаем каждые 10 циклов статус опроса
                 print(f"[{timestamp}] 🔍 Опрос API: новых улучшений не обнаружено.", flush=True)
 
         except Exception as e:
@@ -63,7 +61,7 @@ async def main():
     token_status = f"{config.BOT_TOKEN[:6]}..." if config.BOT_TOKEN and config.BOT_TOKEN != "YOUR_BOT_TOKEN_HERE" else "НЕ ЗАДАН (Пусто)"
 
     print("=" * 60, flush=True)
-    print("🚀 Запуск бота с административной панелью и фоновым монитором", flush=True)
+    print("🚀 Запуск бота с административной панелью, фоновым монитором и Stars Tracker", flush=True)
     print(f"🔑 Статус BOT_TOKEN: {token_status}", flush=True)
     print(f"⏱ Интервал опроса: {config.POLL_INTERVAL} сек.", flush=True)
     print(f"📢 Канал назначения: {config.CHANNEL_ID}", flush=True)
@@ -89,6 +87,9 @@ async def main():
     if config.CHANNEL_ID == "@my_gift_feed_channel" or "@your_channel_username" in config.CHANNEL_ID:
         print("⚠️ ВНИМАНИЕ: Замените CHANNEL_ID в переменной на юзернейм вашего реального Telegram-канала!\n", flush=True)
 
+    # Запускаем фоновый трекер за Звёзды и монитор блокчейна
+    stars_tracker = StarsGiftTracker()
+    asyncio.create_task(stars_tracker.start())
     monitor_task = asyncio.create_task(monitor_loop())
 
     try:
