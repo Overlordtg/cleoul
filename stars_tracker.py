@@ -10,9 +10,8 @@ from bot_publisher import TelegramPublisher
 
 class StarsGiftTracker:
     """
-    Модуль отслеживания улучшений за Звёзды.
-    no_updates=True отключает внутренний рендеринг каналов Pyrogram и 100% убирает спам Peer ID ошибок.
-    Публикует улучшения СТРОГО одного целевого подарка из вашей базы (/list).
+    Модуль отслеживания улучшений за Звёзды (Pyrogram MTProto).
+    С гибким сопоставлением названий подарков и мгновенным выводом логов.
     """
     def __init__(self):
         self.api_id = config.TELEGRAM_API_ID
@@ -23,10 +22,10 @@ class StarsGiftTracker:
 
     async def start(self):
         if not self.api_id or not self.api_hash or not self.session_str:
-            print("⚠️ Pyrogram Stars Tracker: Ожидание подключения TELEGRAM_SESSION_STRING в .env...")
+            print("⚠️ Pyrogram Stars Tracker: Ожидание подключения TELEGRAM_SESSION_STRING в .env...", flush=True)
             return
 
-        print("⚡ Запуск Pyrogram Stars Tracker (Чистый режим без логов)...")
+        print("⚡ Запуск Pyrogram Stars Tracker (Гибкое сопоставление названий)...", flush=True)
 
         try:
             app = Client(
@@ -35,7 +34,7 @@ class StarsGiftTracker:
                 api_hash=self.api_hash,
                 session_string=self.session_str,
                 in_memory=True,
-                no_updates=True  # 100% отключает внутренние ошибки Pyrogram Peer ID в логах!
+                no_updates=True
             )
 
             @app.on_message()
@@ -43,23 +42,36 @@ class StarsGiftTracker:
                 try:
                     parsed = self._parse_event(message)
                     if parsed:
-                        allowed_gifts = [g["name"].lower() for g in db.get_all_gifts() if g.get("name")]
-                        target_name = parsed["gift_name"].lower()
+                        allowed_gifts = [g["name"].strip().lower() for g in db.get_all_gifts() if g.get("name")]
+                        target_name = parsed["gift_name"].strip().lower()
+                        target_clean = re.sub(r"[^\w]", "", target_name)
 
-                        # Если в /list один подарок, пропускаем абсолютно все другие подарки!
-                        if allowed_gifts and not any(allowed in target_name or target_name in allowed for allowed in allowed_gifts):
-                            return
+                        # Гибкая проверка совпадения имени подарка
+                        is_match = False
+                        if not allowed_gifts:
+                            is_match = True  # Если БД пуста, принимаем любые
+                        else:
+                            for allowed in allowed_gifts:
+                                allowed_clean = re.sub(r"[^\w]", "", allowed)
+                                if (allowed_clean in target_clean or 
+                                    target_clean in allowed_clean or 
+                                    any(word in target_name for word in allowed.split() if len(word) > 2)):
+                                    is_match = True
+                                    break
 
-                        if not self.state.is_seen(parsed["id"]):
-                            await self.publisher.send_gift_notification(parsed)
-                            self.state.mark_seen(parsed["id"])
-                except Exception:
-                    pass
+                        print(f"📡 [Stars Event] Подарок: '{parsed['gift_name']}' #{parsed['number']} | Совпадение с БД: {is_match}", flush=True)
+
+                        if is_match and not self.state.is_seen(parsed["id"]):
+                            success = await self.publisher.send_gift_notification(parsed)
+                            if success:
+                                self.state.mark_seen(parsed["id"])
+                except Exception as e:
+                    print(f"⚠️ Ошибка обработки события Pyrogram: {e}", flush=True)
 
             await app.start()
-            print("✅ Pyrogram Stars Tracker работает в чистом фоновом режиме!")
+            print("✅ Pyrogram Stars Tracker активно слушает эфир!", flush=True)
         except Exception as e:
-            print(f"❌ [Pyrogram Error] Ошибка запуска Stars Tracker: {e}")
+            print(f"❌ [Pyrogram Error] Ошибка запуска Stars Tracker: {e}", flush=True)
 
     def _parse_event(self, message: Message) -> Optional[Dict[str, Any]]:
         text = message.text or message.caption or ""
