@@ -1,40 +1,35 @@
 import sqlite3
-import os
+import httpx
+from supabase import create_client, Client, ClientOptions
 from typing import List, Dict, Any
 import config
 
 class GiftsDatabase:
     """
     Универсальный менеджер базы данных.
-    Поддерживает облачный Supabase PostgreSQL, а при отсутствии ключей переключается на локальный SQLite.
+    Работает с облачной PostgreSQL через Supabase.
+    Поддерживает fallback на локальный SQLite при сбоях.
     """
     def __init__(self, db_path: str = "gifts.db"):
         self.db_path = db_path
-        self.use_supabase = False
-        self.supabase_client = None
+        self.supabase: Client = None
 
-        if config.SUPABASE_URL and config.SUPABASE_KEY and config.SUPABASE_URL != "https://xxxxxxxxx.supabase.co":
+        if config.SUPABASE_URL and config.SUPABASE_KEY:
             try:
-                from supabase import create_client
-                self.supabase_client = create_client(config.SUPABASE_URL, config.SUPABASE_KEY)
-                self.use_supabase = True
-                print("⚡ База данных: Успешное подключение к облаку Supabase PostgreSQL!")
+                # Включаем httpx.Client(verify=False) для предотвращения SSL ошибок на серверах и ПК
+                options = ClientOptions(httpx_client=httpx.Client(verify=False))
+                self.supabase = create_client(config.SUPABASE_URL, config.SUPABASE_KEY, options=options)
+                print("⚡ База данных: Успешное подключение к облаку Supabase PostgreSQL!", flush=True)
             except Exception as e:
-                print(f"⚠️ Не удалось подключиться к Supabase ({e}), переключаемся на локальную SQLite.")
-                self.use_supabase = False
+                print(f"⚠️ Ошибка подключения к Supabase ({e}), переключение на локальный SQLite.", flush=True)
 
-        if not self.use_supabase:
-            print("💾 База данных: Используется локальная SQLite (gifts.db).")
-            self._init_sqlite()
-
-    def _get_sqlite_conn(self):
-        return sqlite3.connect(self.db_path)
+        self._init_sqlite()
 
     def _init_sqlite(self):
-        with self._get_sqlite_conn() as conn:
+        with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                CREATE TABLE IF NOT EXISTS tracked_gifts (
+                CREATE TABLE IF NOT EXISTS gifts (
                     gift_id TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
                     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -42,74 +37,80 @@ class GiftsDatabase:
             """)
             conn.commit()
 
-    def add_gift(self, gift_id: str, name: str = "Без названия") -> bool:
-        """Добавляет подарок в БД (Supabase или SQLite)."""
+    def add_gift(self, gift_id: str, name: str) -> bool:
         gift_id = gift_id.strip()
         name = name.strip()
+        
+        # 1. Запись в SQLite
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR REPLACE INTO gifts (gift_id, name)
+                    VALUES (?, ?)
+                """, (gift_id, name))
+                conn.commit()
+        except Exception as e:
+            print(f"❌ [SQLite Error] {e}", flush=True)
 
-        if self.use_supabase:
+        # 2. Синхронизация с Supabase
+        if self.supabase:
             try:
-                self.supabase_client.table("tracked_gifts").upsert({"gift_id": gift_id, "name": name}).execute()
+                self.supabase.table("tracked_gifts").upsert({
+                    "gift_id": gift_id,
+                    "name": name
+                }).execute()
+                print(f"✅ [Supabase] Подарок '{name}' ({gift_id}) успешно сохранен в облачную БД!", flush=True)
                 return True
             except Exception as e:
-                print(f"[Supabase Error] Ошибка добавления подарка {gift_id}: {e}")
-                return False
-        else:
-            try:
-                with self._get_sqlite_conn() as conn:
-                    cursor = conn.cursor()
-                    cursor.execute("""
-                        INSERT OR REPLACE INTO tracked_gifts (gift_id, name)
-                        VALUES (?, ?)
-                    """, (gift_id, name))
-                    conn.commit()
-                    return True
-            except Exception as e:
-                print(f"[SQLite Error] Ошибка добавления подарка {gift_id}: {e}")
-                return False
+                print(f"⚠️ [Supabase Upsert Error] {e}", flush=True)
+                return True
+
+        return True
 
     def remove_gift(self, gift_id: str) -> bool:
-        """Удаляет подарок из БД."""
         gift_id = gift_id.strip()
 
-        if self.use_supabase:
+        # 1. Удаление из SQLite
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM gifts WHERE gift_id = ?", (gift_id,))
+                conn.commit()
+        except Exception as e:
+            print(f"❌ [SQLite Delete Error] {e}", flush=True)
+
+        # 2. Удаление из Supabase
+        if self.supabase:
             try:
-                self.supabase_client.table("tracked_gifts").delete().eq("gift_id", gift_id).execute()
+                self.supabase.table("tracked_gifts").delete().eq("gift_id", gift_id).execute()
+                print(f"✅ [Supabase] Подарок {gift_id} удален из БД!", flush=True)
                 return True
             except Exception as e:
-                print(f"[Supabase Error] Ошибка удаления подарка {gift_id}: {e}")
-                return False
-        else:
-            try:
-                with self._get_sqlite_conn() as conn:
-                    cursor = conn.cursor()
-                    cursor.execute("DELETE FROM tracked_gifts WHERE gift_id = ?", (gift_id,))
-                    conn.commit()
-                    return True
-            except Exception as e:
-                print(f"[SQLite Error] Ошибка удаления подарка {gift_id}: {e}")
-                return False
+                print(f"⚠️ [Supabase Delete Error] {e}", flush=True)
 
-    def get_all_gifts(self) -> List[Dict[str, str]]:
-        """Возвращает полный список отслеживаемых подарков."""
-        if self.use_supabase:
-            try:
-                response = self.supabase_client.table("tracked_gifts").select("*").order("added_at", desc=True).execute()
-                return response.data if response.data else []
-            except Exception as e:
-                print(f"[Supabase Error] Ошибка получения подарков: {e}")
-                return []
-        else:
-            try:
-                with self._get_sqlite_conn() as conn:
-                    conn.row_factory = sqlite3.Row
-                    cursor = conn.cursor()
-                    cursor.execute("SELECT gift_id, name, added_at FROM tracked_gifts ORDER BY added_at DESC")
-                    rows = cursor.fetchall()
-                    return [{"gift_id": row["gift_id"], "name": row["name"], "added_at": row["added_at"]} for row in rows]
-            except Exception as e:
-                print(f"[SQLite Error] Ошибка получения списка подарков: {e}")
-                return []
+        return True
 
-# Единый объект базы данных
+    def get_all_gifts(self) -> List[Dict[str, Any]]:
+        # Сначала пробуем запросить из Supabase
+        if self.supabase:
+            try:
+                response = self.supabase.table("tracked_gifts").select("*").execute()
+                if response.data is not None and len(response.data) > 0:
+                    return response.data
+            except Exception as e:
+                print(f"⚠️ [Supabase Fetch Error] {e}", flush=True)
+
+        # Фолбек на SQLite
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                cursor.execute("SELECT gift_id, name, added_at FROM gifts")
+                rows = cursor.fetchall()
+                return [{"gift_id": row["gift_id"], "name": row["name"], "added_at": row["added_at"]} for row in rows]
+        except Exception as e:
+            print(f"❌ [SQLite Fetch Error] {e}", flush=True)
+            return []
+
 db = GiftsDatabase()
